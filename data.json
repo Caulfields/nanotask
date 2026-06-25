@@ -1,0 +1,151 @@
+{
+  "user": {
+    "level": 1,
+    "xp": 0,
+    "xp_needed": 100,
+    "multiplier": 1,
+    "multiplier_days_to_next": 7
+  },
+  "habits": [
+    {
+      "id": 1,
+      "name": "Трейдинг",
+      "icon": "fa-arrow-trend-up",
+      "type": "habit",
+      "color": "green",
+      "target": 30,
+      "window": 3,
+      "created_at": "2026-06-01",
+      "streak_current": 0,
+      "streak_best": 1,
+      "last_completed": "2026-06-21",
+      "completion_rate": 0,
+      "logs": {},
+      "track_streak": true
+    },
+    {
+      "id": 2,
+      "name": "Спорт",
+      "icon": "fa-dumbbell",
+      "type": "habit",
+      "color": "green",
+      "target": 30,
+      "window": 3,
+      "created_at": "2026-06-01",
+      "streak_current": 0,
+      "streak_best": 1,
+      "last_completed": "2026-06-21",
+      "completion_rate": 0,
+      "logs": {}
+    },
+    {
+      "id": 3,
+      "name": "Английский",
+      "icon": "fa-book-open",
+      "type": "habit",
+      "color": "green",
+      "target": 30,
+      "window": 3,
+      "created_at": "2026-06-01",
+      "streak_current": 0,
+      "streak_best": 1,
+      "last_completed": "2026-06-21",
+      "completion_rate": 0,
+      "logs": {}
+    },
+    {
+      "id": 4,
+      "name": "Медитация",
+      "icon": "fa-spa",
+      "type": "habit",
+      "color": "orange",
+      "target": 30,
+      "window": 3,
+      "created_at": "2026-06-01",
+      "streak_current": 0,
+      "streak_best": 0,
+      "last_completed": null,
+      "completion_rate": 0,
+      "logs": {}
+    },
+    {
+      "id": 5,
+      "name": "Энергетики",
+      "icon": "fa-bolt",
+      "type": "antihabit",
+      "color": "red",
+      "target": 30,
+      "window": 2,
+      "created_at": "2026-06-21",
+      "streak_current": 0,
+      "streak_best": 0,
+      "last_completed": null,
+      "completion_rate": 100,
+      "logs": {},
+      "rule": "не 2 дня подряд"
+    },
+    {
+      "id": 6,
+      "name": "Траты",
+      "icon": "fa-wallet",
+      "type": "antihabit",
+      "color": "red",
+      "target": 30,
+      "window": 2,
+      "created_at": "2026-06-21",
+      "streak_current": 0,
+      "streak_best": 0,
+      "last_completed": null,
+      "completion_rate": 100,
+      "logs": {},
+      "rule": "не 2 дня подряд"
+    },
+    {
+      "id": 7,
+      "name": "Дрочка",
+      "icon": "fa-ban",
+      "type": "antihabit",
+      "color": "red",
+      "target": 30,
+      "window": 2,
+      "created_at": "2026-06-21",
+      "streak_current": 0,
+      "streak_best": 0,
+      "last_completed": null,
+      "completion_rate": 100,
+      "logs": {},
+      "rule": "не 2 дня подряд"
+    }
+  ],
+  "daily_entries": {
+    "2026-06-21": {
+      "productivity": 1,
+      "mood": 3
+    }
+  },
+  "monthly_scores": {
+    "2026-06": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      0
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+    <!-- Боковое меню -->
+    <nav class="sidebar">
+        <div class="logo"><i class="fas fa-circle"></i></div>
+        <div class="nav-menu">
+            <a href="#home" class="nav-item active" data-page="home"><i class="fas fa-house"></i><span>Главная</span></a>
+            <a href="#habits" class="nav-item" data-page="habits"><i class="fas fa-arrows-rotate"></i><span>Привычки</span></a>
+            <a href="#history" class="nav-item" data-page="history"><i class="fas fa-clock-rotate-left"></i><span>История</span></a>
+            <a href="#stats" class="nav-item" data-page="stats"><i class="fas fa-chart-simple"></i><span>Статистика</span></a>
+            <a href="#settings" class="nav-item" data-page="settings"><i class="fas fa-gear"></i><span>Настройки</span></a>
+        </div>
+        <div class="sidebar-footer">
+            <div class="support-btn"><i class="fas fa-headset"></i></div>
+        </div>
+    </nav>
+
+    <!-- Главный контент -->
+    <main class="main-content" id="main-content">
+        <div class="loading-spinner" id="initial-loader">
+            <div class="spinner"></div>
+        </div>
+    </main>
+
+    <!-- Quick-add button -->
+    <button class="fab-add" id="fab-add" title="Добавить привычку">
+        <i class="fas fa-plus"></i>
+    </button>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Modal overlay -->
+    <div class="modal-overlay" id="modal-overlay" style="display:none;">
+        <div class="modal" id="modal-content"></div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
