@@ -6,36 +6,59 @@ const path = require('path');
 const app = express();
 const PORT = 3000;
 
-// Путь к файлу данных
 const DATA_PATH = path.join(__dirname, 'data.json');
+
+// Проверяем наличие Vercel KV (KV_REST_API_URL и KV_REST_API_TOKEN)
+const KV_AVAILABLE = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+
+let kv;
+if (KV_AVAILABLE) {
+  ({ kv } = require('@vercel/kv'));
+  console.log('Vercel KV включен');
+} else {
+  console.log('Vercel KV не настроен — используется файловая система (локальная разработка)');
+}
 
 // --- Middleware ---
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Вспомогательные функции для чтения/записи данных ---
+// --- Helper functions ---
 
-function readData() {
+async function readData() {
   try {
+    if (KV_AVAILABLE) {
+      const raw = await kv.get('app-data');
+      if (raw) return JSON.parse(raw);
+      // Первый запуск: загружаем начальные данные из data.json в KV
+      const seedRaw = fs.readFileSync(DATA_PATH, 'utf-8');
+      const seed = JSON.parse(seedRaw);
+      await kv.set('app-data', seedRaw);
+      return seed;
+    }
+    // Локальная разработка: читаем файл
     const raw = fs.readFileSync(DATA_PATH, 'utf-8');
     return JSON.parse(raw);
   } catch (err) {
-    console.error('Ошибка чтения data.json:', err.message);
+    console.error('Ошибка чтения данных:', err.message);
     throw err;
   }
 }
 
-function writeData(data) {
+async function writeData(data) {
   try {
-    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    if (KV_AVAILABLE) {
+      await kv.set('app-data', JSON.stringify(data));
+    } else {
+      fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    }
   } catch (err) {
-    console.error('Ошибка записи data.json:', err.message);
+    console.error('Ошибка записи данных:', err.message);
     throw err;
   }
 }
 
-// Получить строку сегодняшней даты в формате YYYY-MM-DD
 function getToday() {
   const now = new Date();
   const y = now.getFullYear();
@@ -44,22 +67,19 @@ function getToday() {
   return `${y}-${m}-${d}`;
 }
 
-// Найти последнюю запись в daily_entries
 function findLatestEntry(data) {
   const dates = Object.keys(data.daily_entries).sort().reverse();
   return dates.length > 0 ? dates[0] : null;
 }
 
-// --- API Маршруты ---
+// --- API Routes ---
 
-// GET /api/dashboard — агрегированные данные для главной страницы
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const today = getToday();
     const latestDate = findLatestEntry(data);
 
-    // Auto-recalculate anti-habit streaks
     for (var hi = 0; hi < data.habits.length; hi++) {
       var h = data.habits[hi];
       if (h.type === 'antihabit' && h.track_streak !== false) {
@@ -67,7 +87,6 @@ app.get('/api/dashboard', (req, res) => {
       }
     }
 
-    // Recalculate today's monthly score to keep calendar in sync
     var monthKey = today.substring(0, 7);
     var dayIndex = parseInt(today.substring(8, 10), 10) - 1;
     if (!data.monthly_scores[monthKey]) {
@@ -86,7 +105,9 @@ app.get('/api/dashboard', (req, res) => {
     }
     data.monthly_scores[monthKey][dayIndex] = dailyScore;
 
-    // Сегодняшняя запись или последняя доступная
+    // На Vercel сохраняем пересчитанные данные
+    await writeData(data);
+
     let todayEntry = data.daily_entries[today] || null;
     if (!todayEntry && latestDate) {
       todayEntry = data.daily_entries[latestDate];
@@ -104,10 +125,9 @@ app.get('/api/dashboard', (req, res) => {
   }
 });
 
-// GET /api/habits — список привычек (с фильтрацией по типу)
-app.get('/api/habits', (req, res) => {
+app.get('/api/habits', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const { type } = req.query;
 
     let habits = data.habits;
@@ -121,10 +141,9 @@ app.get('/api/habits', (req, res) => {
   }
 });
 
-// GET /api/habits/:id — одна привычка по ID
-app.get('/api/habits/:id', (req, res) => {
+app.get('/api/habits/:id', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const id = parseInt(req.params.id, 10);
     const habit = data.habits.find(h => h.id === id);
 
@@ -143,7 +162,6 @@ function recalcAntiStreak(habit) {
   var logs = habit.logs || {};
   var allDates = Object.keys(logs).sort();
 
-  // No violations at all → streak is 0 (nothing to be clean from yet)
   if (allDates.length === 0) {
     habit.streak_current = 0;
     return;
@@ -153,12 +171,10 @@ function recalcAntiStreak(habit) {
   var cursor = new Date(today + 'T00:00:00');
   var foundConsecutive = false;
 
-  // Floor: stop counting before the first violation
   var floorDate = null;
   if (habit.created_at) {
     floorDate = new Date(habit.created_at + 'T00:00:00');
   } else {
-    // Fallback: use earliest log date if no created_at
     floorDate = new Date(allDates[0] + 'T00:00:00');
   }
 
@@ -167,11 +183,9 @@ function recalcAntiStreak(habit) {
         String(cursor.getMonth() + 1).padStart(2, '0') + '-' +
         String(cursor.getDate()).padStart(2, '0');
 
-    // Stop if we've gone before the habit was created
     if (cursor < floorDate) break;
 
     if (logs[dateStr]) {
-      // This day has a violation
       var prevDay = new Date(cursor);
       prevDay.setDate(prevDay.getDate() - 1);
       var prevStr = prevDay.getFullYear() + '-' +
@@ -179,12 +193,9 @@ function recalcAntiStreak(habit) {
           String(prevDay.getDate()).padStart(2, '0');
 
       if (logs[prevStr]) {
-        // Two consecutive violations found — stop
         foundConsecutive = true;
       }
-      // Else: isolated violation, skip this day and continue
     } else {
-      // Clean day
       streak++;
     }
 
@@ -197,10 +208,9 @@ function recalcAntiStreak(habit) {
   }
 }
 
-// PUT /api/habits/:id/toggle — переключить выполнение привычки за сегодня
-app.put('/api/habits/:id/toggle', (req, res) => {
+app.put('/api/habits/:id/toggle', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const id = parseInt(req.params.id, 10);
     const habitIndex = data.habits.findIndex(h => h.id === id);
 
@@ -211,7 +221,6 @@ app.put('/api/habits/:id/toggle', (req, res) => {
     const habit = data.habits[habitIndex];
     const today = getToday();
 
-    // Инициализировать logs если не существует
     if (!habit.logs) {
       habit.logs = {};
     }
@@ -219,57 +228,45 @@ app.put('/api/habits/:id/toggle', (req, res) => {
     var xpGained = 0;
 
     if (habit.type === 'antihabit') {
-      // Anti-habit: logs[today] = VIOLATION (did the bad thing)
       if (habit.logs[today]) {
-        // Already violated today — remove violation (undo)
         delete habit.logs[today];
         habit.last_completed = null;
       } else {
-        // Mark violation
         habit.logs[today] = { completed: true, timestamp: new Date().toISOString() };
         habit.last_completed = today;
       }
 
-      // Recalculate streak for anti-habit (if tracking is on)
       if (habit.track_streak !== false) {
         recalcAntiStreak(habit);
       }
     } else {
       var isUndo = !!habit.logs[today];
       if (isUndo) {
-        // Уже выполнена сегодня — отменяем
         delete habit.logs[today];
         if (habit.track_streak !== false) {
           habit.streak_current = Math.max(0, habit.streak_current - 1);
         }
-        // Отнимаем XP, которые были начислены за выполнение
         var xpToRemove = Math.round(5 * data.user.multiplier);
         data.user.xp = Math.max(0, data.user.xp - xpToRemove);
         xpGained = -xpToRemove;
       } else {
-        // Отмечаем как выполненную
         habit.logs[today] = { completed: true, timestamp: new Date().toISOString() };
         if (habit.track_streak !== false) {
           habit.streak_current += 1;
 
-          // Обновляем лучшую серию если текущая больше
           if (habit.streak_current > habit.streak_best) {
             habit.streak_best = habit.streak_current;
           }
 
-          // Обновляем дату последнего выполнения
           habit.last_completed = today;
         } else {
-          // Обновляем дату последнего выполнения даже если серия отключена
           habit.last_completed = today;
         }
 
-        // Начисляем XP за выполнение привычки
         var baseXp = 5;
         xpGained = Math.round(baseXp * data.user.multiplier);
         data.user.xp += xpGained;
 
-        // Проверка повышения уровня
         while (data.user.xp >= data.user.xp_needed) {
           data.user.xp -= data.user.xp_needed;
           data.user.level += 1;
@@ -278,10 +275,8 @@ app.put('/api/habits/:id/toggle', (req, res) => {
       }
     }
 
-    // Пересчитать процент выполнения
     var totalDays;
     if (habit.type === 'antihabit') {
-      // Anti-habit: completion = % of clean days since first log or creation
       var logDates = Object.keys(habit.logs).sort();
       if (logDates.length > 0) {
         var firstLog = new Date(logDates[0] + 'T00:00:00');
@@ -291,46 +286,42 @@ app.put('/api/habits/:id/toggle', (req, res) => {
         var cleanDays = totalDays - violationCount;
         habit.completion_rate = Math.round((cleanDays / totalDays) * 100);
       } else {
-        habit.completion_rate = 100; // No violations = 100% clean
+        habit.completion_rate = 100;
       }
     } else {
-      // Regular habit: existing logic
       var totalLogs = Object.keys(habit.logs).length;
-      var logDates = Object.keys(habit.logs).sort();
+      var logDatesReg = Object.keys(habit.logs).sort();
       var totalDaysReg = 30;
-      if (logDates.length > 0) {
-        var firstLog = new Date(logDates[0]);
+      if (logDatesReg.length > 0) {
+        var firstLogReg = new Date(logDatesReg[0]);
         var lastLog = new Date(today);
-        var diffTime = Math.abs(lastLog - firstLog);
+        var diffTime = Math.abs(lastLog - firstLogReg);
         totalDaysReg = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1);
       }
       habit.completion_rate = Math.round((totalLogs / totalDaysReg) * 100);
     }
 
-    // Сохраняем изменения
     data.habits[habitIndex] = habit;
 
-    // Update monthly_scores for today's calendar heatmap
-    var monthKey = today.substring(0, 7); // "YYYY-MM"
+    var monthKey = today.substring(0, 7);
     var dayIndex = parseInt(today.substring(8, 10), 10) - 1;
     if (!data.monthly_scores[monthKey]) {
       data.monthly_scores[monthKey] = [];
     }
-    // Recalculate today's net score from all habits
     var dailyScore = 0;
     for (var hi = 0; hi < data.habits.length; hi++) {
       var hb = data.habits[hi];
       if (hb.logs && hb.logs[today]) {
         if (hb.type === 'antihabit') {
-          dailyScore -= 1; // Violation of anti-habit
+          dailyScore -= 1;
         } else {
-          dailyScore += 1; // Completed habit
+          dailyScore += 1;
         }
       }
     }
     data.monthly_scores[monthKey][dayIndex] = dailyScore;
 
-    writeData(data);
+    await writeData(data);
 
     res.json({ habit: habit, xp_gained: xpGained, user: data.user });
   } catch (err) {
@@ -338,10 +329,9 @@ app.put('/api/habits/:id/toggle', (req, res) => {
   }
 });
 
-// PUT /api/habits/:id — обновить привычку
-app.put('/api/habits/:id', (req, res) => {
+app.put('/api/habits/:id', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const id = parseInt(req.params.id, 10);
     const habitIndex = data.habits.findIndex(h => h.id === id);
 
@@ -352,7 +342,6 @@ app.put('/api/habits/:id', (req, res) => {
     const allowedFields = ['name', 'icon', 'type', 'color', 'target', 'window', 'rule', 'track_streak'];
     const updates = req.body;
 
-    // Проверка на валидность тела запроса
     if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
       return res.status(400).json({ error: 'Тело запроса должно быть объектом' });
     }
@@ -363,7 +352,7 @@ app.put('/api/habits/:id', (req, res) => {
       }
     }
 
-    writeData(data);
+    await writeData(data);
 
     res.json(data.habits[habitIndex]);
   } catch (err) {
@@ -371,13 +360,11 @@ app.put('/api/habits/:id', (req, res) => {
   }
 });
 
-// POST /api/habits — создать новую привычку
-app.post('/api/habits', (req, res) => {
+app.post('/api/habits', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const { name, icon, type, color, target, window, rule, track_streak } = req.body;
 
-    // Валидация обязательных полей
     if (!name) {
       return res.status(400).json({ error: 'Поле "name" обязательно' });
     }
@@ -385,7 +372,6 @@ app.post('/api/habits', (req, res) => {
       return res.status(400).json({ error: 'Поле "type" должно быть "habit" или "antihabit"' });
     }
 
-    // Генерация нового ID
     const maxId = data.habits.reduce((max, h) => Math.max(max, h.id), 0);
     const newId = maxId + 1;
 
@@ -411,7 +397,7 @@ app.post('/api/habits', (req, res) => {
     }
 
     data.habits.push(newHabit);
-    writeData(data);
+    await writeData(data);
 
     res.status(201).json(newHabit);
   } catch (err) {
@@ -419,10 +405,9 @@ app.post('/api/habits', (req, res) => {
   }
 });
 
-// DELETE /api/habits/:id — удалить привычку
-app.delete('/api/habits/:id', (req, res) => {
+app.delete('/api/habits/:id', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const id = parseInt(req.params.id, 10);
     const habitIndex = data.habits.findIndex(h => h.id === id);
 
@@ -431,7 +416,7 @@ app.delete('/api/habits/:id', (req, res) => {
     }
 
     const deleted = data.habits.splice(habitIndex, 1)[0];
-    writeData(data);
+    await writeData(data);
 
     res.json({ message: `Привычка "${deleted.name}" удалена`, habit: deleted });
   } catch (err) {
@@ -439,19 +424,16 @@ app.delete('/api/habits/:id', (req, res) => {
   }
 });
 
-// PUT /api/daily — обновить запись за сегодня
-app.put('/api/daily', (req, res) => {
+app.put('/api/daily', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const today = getToday();
     const { mood, productivity, weight } = req.body;
 
-    // Валидация тела запроса
     if (req.body && typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Тело запроса должно быть объектом' });
     }
 
-    // Инициализируем запись за сегодня или берём существующую
     let entry = data.daily_entries[today] || {};
 
     if (mood !== undefined) {
@@ -477,14 +459,12 @@ app.put('/api/daily', (req, res) => {
 
     data.daily_entries[today] = entry;
 
-    // Если настроение или продуктивность >= 4, начисляем XP
     const baseXp = ((mood !== undefined && mood >= 4) ? 10 : 0) +
                     ((productivity !== undefined && productivity >= 4) ? 10 : 0);
     const xpGain = Math.round(baseXp * data.user.multiplier);
     if (xpGain > 0) {
       data.user.xp += xpGain;
 
-      // Проверка повышения уровня
       while (data.user.xp >= data.user.xp_needed) {
         data.user.xp -= data.user.xp_needed;
         data.user.level += 1;
@@ -492,7 +472,7 @@ app.put('/api/daily', (req, res) => {
       }
     }
 
-    writeData(data);
+    await writeData(data);
 
     res.json({ entry: data.daily_entries[today], xp_gained: xpGain, user: data.user });
   } catch (err) {
@@ -500,25 +480,21 @@ app.put('/api/daily', (req, res) => {
   }
 });
 
-// GET /api/heatmap — данные тепловой карты (сырые monthly_scores)
-app.get('/api/heatmap', (req, res) => {
+app.get('/api/heatmap', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     res.json({ monthly_scores: data.monthly_scores });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка сервера при загрузке тепловой карты', details: err.message });
   }
 });
 
-// POST /api/reset — сбросить дневные записи и логи привычек
-app.post('/api/reset', (req, res) => {
+app.post('/api/reset', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
 
-    // Очищаем дневные записи
     data.daily_entries = {};
 
-    // Очищаем логи всех привычек
     for (const habit of data.habits) {
       habit.logs = {};
       if (habit.track_streak !== false) {
@@ -529,17 +505,15 @@ app.post('/api/reset', (req, res) => {
       }
     }
 
-    // Сбрасываем XP и уровень
     data.user.xp = 0;
     data.user.level = 1;
     data.user.xp_needed = 100;
     data.user.multiplier = 1.0;
     data.user.multiplier_days_to_next = 7;
 
-    // Очищаем monthly_scores
     data.monthly_scores = {};
 
-    writeData(data);
+    await writeData(data);
 
     res.json({
       message: 'Данные сброшены',
@@ -551,29 +525,24 @@ app.post('/api/reset', (req, res) => {
   }
 });
 
-// GET /api/stats — статистика (вес, настроение, продуктивность, выполнение)
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
-    const data = readData();
+    const data = await readData();
     const dates = Object.keys(data.daily_entries).sort();
 
-    // Последние 12 записей с весом
     const weightHistory = dates
       .filter(d => data.daily_entries[d].weight !== undefined)
       .slice(-12)
       .map(d => ({ date: d, weight: data.daily_entries[d].weight }));
 
-    // История настроения
     const moodHistory = dates
       .filter(d => data.daily_entries[d].mood !== undefined)
       .map(d => ({ date: d, mood: data.daily_entries[d].mood }));
 
-    // История продуктивности
     const productivityHistory = dates
       .filter(d => data.daily_entries[d].productivity !== undefined)
       .map(d => ({ date: d, productivity: data.daily_entries[d].productivity }));
 
-    // Процент выполнения по привычкам
     const habitCompletionRates = data.habits.map(h => ({
       id: h.id,
       name: h.name,
@@ -594,7 +563,7 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// --- Обработка 404 для неизвестных API маршрутов ---
+// --- 404 для API ---
 app.use('/api/*', (req, res) => {
   res.status(404).json({ error: `Маршрут ${req.method} ${req.originalUrl} не найден` });
 });
@@ -605,8 +574,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера', details: err.message });
 });
 
-// --- Запуск сервера ---
-app.listen(PORT, () => {
-  console.log(`Сервер запущен: http://localhost:${PORT}`);
-  console.log(`Данные: ${DATA_PATH}`);
-});
+// --- Запуск (только для локальной разработки) ---
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Сервер запущен: http://localhost:${PORT}`);
+    console.log(`KV: ${KV_AVAILABLE ? 'включен' : 'выключен (файловая система)'}`);
+    console.log(`Данные: ${DATA_PATH}`);
+  });
+}
+
+module.exports = app;
