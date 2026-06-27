@@ -10,13 +10,18 @@ const DATA_PATH = path.join(__dirname, 'data.json');
 
 // Проверяем наличие Vercel KV (KV_REST_API_URL и KV_REST_API_TOKEN)
 const KV_AVAILABLE = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+const IS_VERCEL = !!process.env.VERCEL;
 
 let kv;
+let memCache = null; // in-memory fallback на Vercel без KV
+
 if (KV_AVAILABLE) {
   ({ kv } = require('@vercel/kv'));
   console.log('Vercel KV включен');
+} else if (IS_VERCEL) {
+  console.log('Vercel KV не настроен — используется in-memory (данные не сохраняются между деплоями)');
 } else {
-  console.log('Vercel KV не настроен — используется файловая система (локальная разработка)');
+  console.log('Локальная разработка — используется файловая система');
 }
 
 // --- Middleware ---
@@ -26,20 +31,28 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Helper functions ---
 
+function loadSeedData() {
+  const raw = fs.readFileSync(DATA_PATH, 'utf-8');
+  return JSON.parse(raw);
+}
+
 async function readData() {
   try {
     if (KV_AVAILABLE) {
       const raw = await kv.get('app-data');
       if (raw) return JSON.parse(raw);
-      // Первый запуск: загружаем начальные данные из data.json в KV
-      const seedRaw = fs.readFileSync(DATA_PATH, 'utf-8');
-      const seed = JSON.parse(seedRaw);
-      await kv.set('app-data', seedRaw);
+      const seed = loadSeedData();
+      await kv.set('app-data', JSON.stringify(seed));
       return seed;
     }
-    // Локальная разработка: читаем файл
-    const raw = fs.readFileSync(DATA_PATH, 'utf-8');
-    return JSON.parse(raw);
+    if (IS_VERCEL) {
+      // In-memory fallback на Vercel: первый запрос загружает из data.json
+      if (memCache) return memCache;
+      memCache = loadSeedData();
+      return memCache;
+    }
+    // Локальная разработка
+    return JSON.parse(fs.readFileSync(DATA_PATH, 'utf-8'));
   } catch (err) {
     console.error('Ошибка чтения данных:', err.message);
     throw err;
@@ -50,6 +63,8 @@ async function writeData(data) {
   try {
     if (KV_AVAILABLE) {
       await kv.set('app-data', JSON.stringify(data));
+    } else if (IS_VERCEL) {
+      memCache = data;
     } else {
       fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
     }
